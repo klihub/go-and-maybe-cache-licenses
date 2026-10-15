@@ -20,7 +20,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/go-licenses/v2/internal/third_party/pkgsite/source"
+	"github.com/klihub/go-and-maybe-cache-licenses/internal/third_party/pkgsite/source"
 )
 
 // vanityLib builds a library whose module path needs a meta-tag fetch to

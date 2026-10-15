@@ -18,7 +18,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/google/go-licenses/v2/internal/third_party/pkgsite/source"
+	"github.com/klihub/go-and-maybe-cache-licenses/internal/third_party/pkgsite/source"
 )
 
 func TestFileURLServedFromCache(t *testing.T) {

@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/go-licenses/v2/internal/third_party/pkgsite/derrors"
-	"github.com/google/go-licenses/v2/internal/third_party/pkgsite/version"
+	"github.com/klihub/go-and-maybe-cache-licenses/internal/third_party/pkgsite/derrors"
+	"github.com/klihub/go-and-maybe-cache-licenses/internal/third_party/pkgsite/version"
 	"golang.org/x/mod/semver"
 )
 

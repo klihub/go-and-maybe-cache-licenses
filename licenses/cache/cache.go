@@ -34,7 +34,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-licenses/v2/licenses"
+	"github.com/klihub/go-and-maybe-cache-licenses/licenses"
 	"golang.org/x/mod/module"
 )
 

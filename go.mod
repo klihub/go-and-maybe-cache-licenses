@@ -1,4 +1,4 @@
-module github.com/google/go-licenses/v2
+module github.com/klihub/go-and-maybe-cache-licenses
 
 go 1.26.0
 

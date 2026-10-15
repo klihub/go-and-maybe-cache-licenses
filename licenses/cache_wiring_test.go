@@ -141,7 +141,7 @@ func TestLibrariesCachesNegativeResults(t *testing.T) {
 func TestLibrariesNeverCachesTheMainModule(t *testing.T) {
 	ctx := context.Background()
 	cache := newMemCache()
-	const mainPkg = "github.com/google/go-licenses/v2/licenses/testdata"
+	const mainPkg = "github.com/klihub/go-and-maybe-cache-licenses/licenses/testdata"
 
 	first := newCountingClassifier()
 	if _, err := FindLibraries(ctx, Options{Classifier: first, Cache: cache}, mainPkg); err != nil {
@@ -165,7 +165,7 @@ func TestLibrariesNeverCachesTheMainModule(t *testing.T) {
 
 func TestLibrariesWithoutCacheMatchesLibraries(t *testing.T) {
 	ctx := context.Background()
-	const mainPkg = "github.com/google/go-licenses/v2/licenses/testdata"
+	const mainPkg = "github.com/klihub/go-and-maybe-cache-licenses/licenses/testdata"
 
 	viaOptions, err := FindLibraries(ctx,
 		Options{Classifier: newCountingClassifier(), Cache: nil}, mainPkg)

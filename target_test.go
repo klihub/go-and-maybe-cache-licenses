@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-licenses/v2/licenses"
+	"github.com/klihub/go-and-maybe-cache-licenses/licenses"
 )
 
 func TestParseTargetSpec(t *testing.T) {

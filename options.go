@@ -15,7 +15,7 @@
 package main
 
 import (
-	"github.com/google/go-licenses/v2/licenses"
+	"github.com/klihub/go-and-maybe-cache-licenses/licenses"
 	"k8s.io/klog/v2"
 )
 

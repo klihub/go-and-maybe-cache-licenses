@@ -199,11 +199,11 @@ func packageDir(p *packages.Package) string {
 }
 
 // majorVersionSuffix matches a module path's major version element, as in the
-// "/v2" of "github.com/google/go-licenses/v2".
+// "/v2" of "github.com/klihub/go-and-maybe-cache-licenses".
 var majorVersionSuffix = regexp.MustCompile(`^v[0-9]+$`)
 
 // moduleBase returns the last meaningful element of a module path, skipping a
-// major version suffix. "github.com/google/go-licenses/v2" yields
+// major version suffix. "github.com/klihub/go-and-maybe-cache-licenses" yields
 // "go-licenses" rather than "v2", which is what a caller naming output after a
 // module wants.
 func moduleBase(modulePath string) string {

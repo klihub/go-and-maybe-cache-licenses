@@ -27,11 +27,17 @@ To use this tool, make sure:
 
 ## Installation
 
-Use the following command to download and install this tool:
+This is a fork of [google/go-licenses](https://github.com/google/go-licenses),
+adding a license cache and per-target resolution. Use the following command to
+download and install it:
 
 ```shell
-go install github.com/google/go-licenses/v2@latest
+go install github.com/klihub/go-and-maybe-cache-licenses@latest
 ```
+
+Note that this installs a binary named `go-and-maybe-cache-licenses`, since
+`go install` names the binary after the module. The examples below call
+`go-licenses`, so symlink or alias it if you want them to work as written.
 
 If you were using `go get` to install this tool, note that
 [starting in Go 1.17, go get is deprecated for installing binaries](https://go.dev/doc/go-get-install-deprecation).

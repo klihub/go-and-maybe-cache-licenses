@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-licenses/v2/licenses"
+	"github.com/klihub/go-and-maybe-cache-licenses/licenses"
 )
 
 const testClassifier = "v2.0.0"

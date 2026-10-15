@@ -77,9 +77,9 @@ func shapes(libs []*Library) []libShape {
 }
 
 const (
-	pkgTestdata = "github.com/google/go-licenses/v2/licenses/testdata"
-	pkgDirect   = "github.com/google/go-licenses/v2/licenses/testdata/direct"
-	pkgIndirect = "github.com/google/go-licenses/v2/licenses/testdata/indirect"
+	pkgTestdata = "github.com/klihub/go-and-maybe-cache-licenses/licenses/testdata"
+	pkgDirect   = "github.com/klihub/go-and-maybe-cache-licenses/licenses/testdata/direct"
+	pkgIndirect = "github.com/klihub/go-and-maybe-cache-licenses/licenses/testdata/indirect"
 )
 
 // testdataClassifier is the stub from library_test.go, as a Classifier.

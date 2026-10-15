@@ -18,7 +18,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/google/go-licenses/v2/licenses/cache"
+	"github.com/klihub/go-and-maybe-cache-licenses/licenses/cache"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )

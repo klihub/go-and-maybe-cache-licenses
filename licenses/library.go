@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/google/go-licenses/v2/internal/third_party/pkgsite/source"
+	"github.com/klihub/go-and-maybe-cache-licenses/internal/third_party/pkgsite/source"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/tools/go/packages"
 	"k8s.io/klog/v2"
