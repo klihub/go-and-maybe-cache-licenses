@@ -66,7 +66,12 @@ func init() {
 }
 
 func main() {
-	flag.Parse()
+	// Register klog's flags as persistent flags and let cobra do all the
+	// parsing. Calling flag.Parse() here instead would hand os.Args to the
+	// standard flag package, which knows nothing of cobra's own flags and so
+	// rejects any of them that appears before the subcommand - it only seems
+	// to work for klog's flags because parsing stops at the first non-flag
+	// argument, i.e. at the subcommand name.
 	rootCmd.PersistentFlags().AddGoFlagSet(flag.CommandLine)
 	rootCmd.SilenceErrors = true // to avoid duplicate error output
 	rootCmd.SilenceUsage = true  // to avoid usage/help output on error
