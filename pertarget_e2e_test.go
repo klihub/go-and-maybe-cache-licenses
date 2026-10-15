@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -144,5 +145,37 @@ func TestPerTargetWithoutTargetPathStillUnions(t *testing.T) {
 	if len(union) < len(direct) {
 		t.Errorf("union report is shorter (%d bytes) than the single-target report (%d bytes)",
 			len(union), len(direct))
+	}
+}
+
+// TestMainOnlyWarnsWhenItFiltersEverything covers a silent no-op: --main_only
+// over a pattern that matches only library packages produced no output and
+// exited 0, with nothing said about why.
+func TestMainOnlyWarnsWhenItFiltersEverything(t *testing.T) {
+	goLicenses := buildGoLicenses(t)
+	outDir := t.TempDir()
+
+	cmd := exec.Command(goLicenses, "report", "--cache=false", "--main_only",
+		"--target_path", filepath.Join(outDir, "{{.Rel}}.csv"), "./licenses/...")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go-licenses report --main_only: %v\n%s", err, stderr.String())
+	}
+
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no output for a pattern with no main packages, got %d files", len(entries))
+	}
+
+	log := stderr.String()
+	for _, want := range []string{"main_only", "./licenses/..."} {
+		if !strings.Contains(log, want) {
+			t.Errorf("stderr does not mention %q; a run that produces nothing must say why.\nstderr:\n%s",
+				want, log)
+		}
 	}
 }

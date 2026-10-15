@@ -22,6 +22,7 @@ import (
 	"text/template"
 
 	"github.com/google/go-licenses/v2/licenses"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -53,6 +54,24 @@ func resolvePerTarget(opts licenses.Options, args []string) ([]targetOutput, err
 	if err != nil {
 		return nil, err
 	}
+
+	// A pattern that matched nothing is already an error, so a pattern missing
+	// from the results was filtered out by --main_only. Say so: producing no
+	// output and exiting successfully is otherwise indistinguishable from the
+	// pattern being wrong.
+	if mainOnly {
+		resolved := make(map[string]bool, len(results))
+		for _, r := range results {
+			resolved[r.Target.Pattern] = true
+		}
+		for _, s := range specs {
+			if !resolved[s.Pattern] {
+				klog.Warningf("--main_only filtered out every package matched by %q, "+
+					"so no output is produced for it.", s.Pattern)
+			}
+		}
+	}
+
 	return resolveOutputs(targetPath, specs, results)
 }
 
