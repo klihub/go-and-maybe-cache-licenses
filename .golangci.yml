@@ -1,0 +1,12 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # internal/third_party is a vendored copy of pkgsite, kept close to its
+      # original so it can be updated from upstream. Linting it would mean
+      # carrying style changes that make those updates harder.
+      - path: ^internal/third_party/
+        linters:
+          - errcheck
+          - staticcheck

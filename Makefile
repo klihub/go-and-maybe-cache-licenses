@@ -19,10 +19,10 @@ test: FORCE
 	go test ./...
 
 # Note, when upgrading, also upgrade version in .github/workflows/golangci-lint.yml.
-GOLANGCI_LINT_VERSION=v1.49
+GOLANGCI_LINT_VERSION=v2.14.0
 lint:  FORCE
 	@which golangci-lint >/dev/null || ( \
-		echo 'golangci-lint is not installed. Install by:\ngo install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)' \
+		echo 'golangci-lint is not installed. Install by:\ngo install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)' \
 		&& exit 1 )
 	golangci-lint run -v
 
