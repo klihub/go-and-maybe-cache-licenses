@@ -33,6 +33,12 @@ import (
 
 const (
 	UNKNOWN = "Unknown"
+
+	// licenseURLTimeout bounds a single license URL lookup. Resolving a module
+	// path that is not recognised statically means one small HTTP request for
+	// go-source meta tags, so a long timeout only prolongs the wait for hosts
+	// that are down.
+	licenseURLTimeout = 10 * time.Second
 )
 
 var (
@@ -132,7 +138,7 @@ func writeReportFile(libs []*licenses.Library, path string) error {
 // reportLibraries resolves license URLs for libs and writes the report to w.
 func reportLibraries(libs []*licenses.Library, w io.Writer) error {
 	reportData := make([]libraryData, len(libs))
-	client := source.NewClient(time.Second * 20)
+	client := source.NewClient(licenseURLTimeout)
 	group, gctx := errgroup.WithContext(context.Background())
 	for idx, lib := range libs {
 		idx := idx

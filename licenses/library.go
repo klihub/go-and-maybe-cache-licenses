@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/google/go-licenses/v2/internal/third_party/pkgsite/source"
 	"golang.org/x/sync/errgroup"
@@ -39,9 +40,12 @@ type Library struct {
 	module *Module
 	// List of licenses for found at the LicenseFile.
 	Licenses []License
-	// cache memoizes license URL resolution. Set by FindLibraries; nil when
-	// caching is disabled.
+	// cache memoizes license URL resolution across runs. Set by
+	// FindLibraries; nil when caching is disabled.
 	cache Cache
+	// memo remembers URL resolutions within one run, including failures.
+	// Set by FindLibraries.
+	memo *urlMemo
 }
 
 // PackagesError aggregates all Packages[].Errors into a single error.
@@ -71,6 +75,10 @@ type Options struct {
 	// IgnoredPaths are package path prefixes to ignore. Dependencies of the
 	// ignored packages are still checked.
 	IgnoredPaths []string
+	// Progress, when non-nil, is called as candidate files are classified,
+	// with the number finished and the total. The total is known before
+	// classification starts. It may be called from several goroutines.
+	Progress func(done, total int)
 	// MainOnly restricts per-target resolution to main packages, which is
 	// useful when a wildcard pattern expands to library packages that are not
 	// shipped. It has no effect on FindLibraries.
@@ -114,6 +122,7 @@ type pkgInfo struct {
 // all of them.
 type resolution struct {
 	opts          Options
+	memo          *urlMemo
 	roots         []*packages.Package
 	allModules    map[string]*Module
 	allPackages   []pkgInfo
@@ -305,6 +314,15 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 		candidate string
 		licenes   []License
 	}, len(allCandidates))
+	// Classification is the slow phase on a cold cache, and its size is known
+	// here, so progress over it is a real proportion.
+	totalCandidates := len(allCandidates)
+	var classified atomic.Int64
+	reportProgress := func() {
+		if opts.Progress != nil {
+			opts.Progress(int(classified.Add(1)), totalCandidates)
+		}
+	}
 	counter := 0
 	for candidate := range allCandidates {
 		idx := counter
@@ -324,6 +342,7 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 						candidate: candidate,
 						licenes:   cached,
 					}
+					reportProgress()
 					return nil
 				}
 			}
@@ -331,6 +350,7 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 			licenses, err := classifier.Identify(candidate)
 			if err != nil {
 				klog.Errorf("Failed to parse %s: %v", candidate, err)
+				reportProgress()
 				return nil // Continue even if one LICENSE file fails to parse.
 			}
 
@@ -350,6 +370,7 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 				candidate: candidate,
 				licenes:   licenses,
 			}
+			reportProgress()
 			return nil
 		})
 	}
@@ -369,6 +390,7 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 
 	return &resolution{
 		opts:          opts,
+		memo:          newURLMemo(),
 		roots:         rootPkgs,
 		allModules:    allModules,
 		allPackages:   allPackages,
@@ -408,6 +430,7 @@ func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
 					Packages: []string{p.pkgPath},
 					module:   allModules[p.modulePath],
 					cache:    opts.Cache,
+					memo:     r.memo,
 				})
 			}
 			continue
@@ -419,6 +442,7 @@ func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
 			Packages:    make([]string, len(pkgs)),
 			module:      allModules[pkgs[0].modulePath],
 			cache:       opts.Cache,
+			memo:        r.memo,
 		}
 
 		for i, p := range pkgs {
@@ -513,6 +537,32 @@ func (l *Library) FileURL(ctx context.Context, cl *source.Client, filePath strin
 		return "", wrap(err)
 	}
 	key := Key{Module: m.Path, Version: m.Version, Path: filepath.ToSlash(relativePath)}
+
+	// A resolution already attempted in this run is not attempted again, even
+	// if it failed. Several targets usually share most of their dependencies,
+	// and an unreachable one would otherwise cost a full HTTP timeout per
+	// target. See urlMemo.
+	if remembered, ok := l.memo.lookup(key); ok {
+		if remembered.err != nil {
+			return "", wrap(remembered.err)
+		}
+		return remembered.url, nil
+	}
+
+	url, err := l.resolveFileURL(ctx, cl, key, relativePath)
+	l.memo.record(key, url, err)
+	if err != nil {
+		return "", wrap(err)
+	}
+	return url, nil
+}
+
+// resolveFileURL determines the URL for a file, consulting the cache before
+// reaching out to the repository. It returns unwrapped errors so that each
+// caller can attribute them to its own library.
+func (l *Library) resolveFileURL(ctx context.Context, cl *source.Client, key Key, relativePath string) (string, error) {
+	m := l.module
+
 	cacheable := l.cache != nil && key.Cacheable()
 	if cacheable {
 		if url, ok := l.cache.URL(key); ok {
@@ -522,7 +572,7 @@ func (l *Library) FileURL(ctx context.Context, cl *source.Client, filePath strin
 
 	remote, err := source.ModuleInfo(ctx, cl, m.Path, m.Version)
 	if err != nil {
-		return "", wrap(err)
+		return "", err
 	}
 	if m.Version == "" {
 		// This always happens for the module in development.
@@ -556,7 +606,7 @@ func (l *Library) FileURL(ctx context.Context, cl *source.Client, filePath strin
 	// network failure into a permanently wrong URL.
 	if cacheable && url != "" && !remote.UnverifiedModuleDir() {
 		if err := l.cache.PutURL(key, url); err != nil {
-			klog.Warningf("Failed to cache license URL for %s: %v", filePath, err)
+			klog.Warningf("Failed to cache license URL for %s/%s: %v", key.Module, key.Path, err)
 		}
 	}
 	return url, nil
