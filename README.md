@@ -445,6 +445,40 @@ In CI, point `--cache_dir` somewhere your job restores between runs. The cache
 is keyed per module version, so bumping one dependency keeps the entries for all
 the others.
 
+## GitHub action
+
+`actions/check-licenses` runs the policy check, extracts the licenses and
+writes the reports, caching what it resolves between runs:
+
+```yaml
+- uses: actions/checkout@v5
+- uses: actions/setup-go@v5
+  with:
+    go-version-file: go.mod
+- uses: klihub/go-and-maybe-cache-licenses/actions/check-licenses@main
+  with:
+    targets: |
+      my-frontend=./cmd/frontend
+      my-backend=./cmd/backend
+    allowed-licenses: Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT
+    licenses-path: licenses
+    report-path: licenses/{{ .Name }}/licenses.csv
+```
+
+A violation fails the step and is reported as an annotation per offending
+library. Set `on-violation: warn` to report without failing; the
+`violations` and `violation-count` outputs are set either way, so a warning
+run can still gate something later.
+
+Extraction and reporting only run once the policy has passed, so a failing
+run does not leave output that looks approved.
+
+The action needs a Go toolchain, since resolving licenses runs `go list`, so
+run `actions/setup-go` before it. By default it runs the tool from a
+published image; set `tool-image: ''` to install the tool with `go install`
+instead. See [`actions/check-licenses/action.yml`](actions/check-licenses/action.yml)
+for every input.
+
 ## Warnings and errors
 
 The tool will log warnings and errors in some scenarios. This section provides

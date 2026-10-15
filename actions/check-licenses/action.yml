@@ -1,0 +1,154 @@
+name: Check and extract licenses
+description: >
+  Check dependency licenses against a policy, extract the licenses they
+  require, and report them. Resolves every target in one run and caches
+  what it resolves, so repeated runs neither reclassify license files nor
+  look license URLs up again.
+
+inputs:
+  targets:
+    description: >
+      Packages to resolve, one per line. Either a package pattern, or
+      "name=pattern" to name that target's output - useful when the output
+      name is not derivable from the package path, as for binaries built
+      from ./cmd/<something>. Give either this or targets-command.
+    required: false
+    default: ''
+  targets-command:
+    description: >
+      Command whose output is the target list, one per line, in the same form
+      as targets. Lets a repository that already knows which binaries it
+      ships print the list from that same definition, rather than repeating
+      it here and having the two drift apart.
+    required: false
+    default: ''
+  allowed-licenses:
+    description: >
+      Comma-separated license names that are acceptable. Anything else is a
+      violation. Leave empty to use the tool's default policy, which rejects
+      forbidden and unidentifiable licenses.
+    required: false
+    default: ''
+  allowed-licenses-command:
+    description: >
+      Command whose output is the accepted license list, as an alternative to
+      allowed-licenses. Lets a repository keep one definition of its policy
+      and have both its local checks and this action read it from there.
+    required: false
+    default: ''
+  disallowed-types:
+    description: >
+      Comma-separated license types to reject, as an alternative to
+      allowed-licenses. The two cannot be combined.
+    required: false
+    default: ''
+  on-violation:
+    description: 'What a policy violation does: "error" fails the step, "warn" does not.'
+    required: false
+    default: error
+  licenses-path:
+    description: >
+      Directory to extract the licenses into, one subdirectory per target.
+      Empty skips extraction.
+    required: false
+    default: ''
+  report-path:
+    description: >
+      Where to write per-target reports, as a Go template over the target,
+      for example "licenses/{{ .Name }}/licenses.csv". Empty skips reporting.
+    required: false
+    default: ''
+  ignore:
+    description: >
+      Package path prefixes to ignore, one per line. Dependencies of the
+      ignored packages are still resolved.
+    required: false
+    default: ''
+  include-tests:
+    description: Include packages only imported by testing code.
+    required: false
+    default: 'false'
+  main-only:
+    description: >
+      When a target pattern is a wildcard, keep only main packages. Useful
+      when a pattern such as ./cmd/... also matches library packages.
+    required: false
+    default: 'false'
+  progress:
+    description: Report how far along the run is.
+    required: false
+    default: 'false'
+  cache-path:
+    description: Where to keep the license cache.
+    required: false
+    default: .cache/go-licenses
+  cache-key-files:
+    description: >
+      Files whose contents key the cache. Entries are per module version, so
+      a restore from an older key is still useful and is attempted.
+    required: false
+    default: go.sum
+  tool-image:
+    description: >
+      Container image to run the tool from. Set to an empty string to install
+      the tool with "go install" instead, which needs no container runtime.
+    required: false
+    default: ghcr.io/klihub/go-and-maybe-cache-licenses:main
+  tool-module:
+    description: Module to install when tool-image is empty.
+    required: false
+    default: github.com/klihub/go-and-maybe-cache-licenses
+  tool-version:
+    description: Version to install when tool-image is empty.
+    required: false
+    default: main
+
+outputs:
+  violations:
+    description: '"true" when the policy was violated.'
+    value: ${{ steps.licenses.outputs.violations }}
+  violation-count:
+    description: Number of reported violations.
+    value: ${{ steps.licenses.outputs.violation-count }}
+
+runs:
+  using: composite
+  steps:
+    # Restore and save explicitly rather than with the combined action, so
+    # the cache is still written when the policy check fails - a red run
+    # would otherwise leave the next one cold.
+    - name: Restore license cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.cache-path }}
+        key: go-licenses-${{ hashFiles(inputs.cache-key-files) }}
+        restore-keys: go-licenses-
+
+    - name: Check and extract licenses
+      id: licenses
+      shell: bash
+      env:
+        INPUT_TARGETS: ${{ inputs.targets }}
+        INPUT_TARGETS_COMMAND: ${{ inputs.targets-command }}
+        INPUT_ALLOWED_LICENSES: ${{ inputs.allowed-licenses }}
+        INPUT_ALLOWED_LICENSES_COMMAND: ${{ inputs.allowed-licenses-command }}
+        INPUT_DISALLOWED_TYPES: ${{ inputs.disallowed-types }}
+        INPUT_ON_VIOLATION: ${{ inputs.on-violation }}
+        INPUT_LICENSES_PATH: ${{ inputs.licenses-path }}
+        INPUT_REPORT_PATH: ${{ inputs.report-path }}
+        INPUT_IGNORE: ${{ inputs.ignore }}
+        INPUT_INCLUDE_TESTS: ${{ inputs.include-tests }}
+        INPUT_MAIN_ONLY: ${{ inputs.main-only }}
+        INPUT_PROGRESS: ${{ inputs.progress }}
+        INPUT_CACHE_PATH: ${{ inputs.cache-path }}
+        INPUT_TOOL_IMAGE: ${{ inputs.tool-image }}
+        INPUT_TOOL_MODULE: ${{ inputs.tool-module }}
+        INPUT_TOOL_VERSION: ${{ inputs.tool-version }}
+      run: ${{ github.action_path }}/run.sh
+
+    - name: Save license cache
+      uses: actions/cache/save@v4
+      if: always()
+      with:
+        path: ${{ inputs.cache-path }}
+        key: go-licenses-${{ hashFiles(inputs.cache-key-files) }}
