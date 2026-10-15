@@ -36,6 +36,34 @@ go install github.com/google/go-licenses/v2@latest
 If you were using `go get` to install this tool, note that
 [starting in Go 1.17, go get is deprecated for installing binaries](https://go.dev/doc/go-get-install-deprecation).
 
+### Container image
+
+A container image is published to `ghcr.io` on every push to `main`:
+
+```shell
+docker run --rm --user "$(id -u):$(id -g)" \
+    -v "$PWD":/work:ro \
+    -v "$(go env GOMODCACHE)":/go/pkg/mod:ro \
+    -v "$PWD/.cache/licenses":/cache \
+    -v "$PWD/licenses":/out \
+    -e GO_LICENSES_CACHE_DIR=/cache -e HOME=/tmp -e GOCACHE=/tmp/gocache \
+    ghcr.io/klihub/go-and-maybe-cache-licenses:main \
+    report --target_path '/out/{{ .Name }}.csv' ./cmd/frontend ./cmd/backend
+```
+
+A few things about that invocation are not optional:
+
+* **The module cache must be mounted.** Resolving licenses runs `go list` over
+  the project, so without a populated module cache the container downloads
+  every dependency on each run.
+* **`--user` keeps the output yours.** The container otherwise writes the
+  cache and the saved licenses as `root`, mode 0700. `HOME` and `GOCACHE` have
+  to point somewhere writable for that user.
+* **The image carries a Go toolchain**, because resolving licenses needs one.
+  It can only analyse projects whose `go` directive its toolchain satisfies,
+  and `GOTOOLCHAIN=local` is set so that a too-old toolchain is a clear error
+  rather than a silent toolchain download.
+
 ## Reports
 
 ```shell

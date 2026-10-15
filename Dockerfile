@@ -1,34 +1,40 @@
-FROM golang:1.18 as build
+# go-licenses execs the Go toolchain at runtime - packages.Load runs "go list" -
+# so the toolchain has to stay in the final image. An image carrying only the
+# binary cannot analyse anything.
+#
+# The final stage uses the same base as the build stage on purpose. isStdLib
+# compares package paths against the GOROOT baked into the binary, so a binary
+# built elsewhere stops recognising the standard library and every stdlib
+# package is reported as having no module info.
+FROM golang:1.27-alpine AS build
 
-WORKDIR /go-licenses
+WORKDIR /src
 
-ARG GOFLAGS=""
-ENV GOFLAGS=$GOFLAGS
-ENV GO111MODULE=on
-
-# Download dependencies first - this should be cacheable.
+# Dependencies first, so this layer survives source-only changes.
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Now add the local repo, which typically isn't cacheable.
 COPY . .
+RUN go build -o /out/go-and-maybe-cache-licenses .
 
-# Check that all of the Go code builds
-RUN go build ./...
-
-# Run the tests
-RUN go test -v ./...
-
-# Install the binary into /go/bin
-RUN go install .
-
-# Save licenses, etc.
+# Record the licenses of our own dependencies.
 RUN go run . save . --save_path /THIRD_PARTY_NOTICES
 
-# Make a minimal image.
-FROM gcr.io/distroless/base
+FROM golang:1.27-alpine
 
-COPY --from=build /go/bin/go-licenses /
+# Not in the base image, and the toolchain needs it to fetch modules straight
+# from version control.
+RUN apk add --no-cache git
+
+COPY --from=build /out/go-and-maybe-cache-licenses /usr/local/bin/
 COPY --from=build /THIRD_PARTY_NOTICES /THIRD_PARTY_NOTICES
 
-ENTRYPOINT ["/go-licenses"]
+# Fail loudly rather than silently downloading a toolchain when a project
+# requires a newer Go than this image carries. A silent download would also
+# defeat running without network access.
+ENV GOTOOLCHAIN=local
+
+# Analysis runs against a mounted source tree.
+WORKDIR /work
+
+ENTRYPOINT ["go-and-maybe-cache-licenses"]
