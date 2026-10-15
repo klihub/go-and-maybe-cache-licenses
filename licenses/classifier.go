@@ -28,7 +28,8 @@ type Classifier interface {
 }
 
 type googleClassifier struct {
-	classifier *licenseclassifier.Classifier
+	// load returns the license corpus, loading it at most once.
+	load func() (*licenseclassifier.Classifier, error)
 	// mu serializes matching. licenseclassifier's Classifier is not safe for
 	// concurrent use: its scoring path reaches sergi/go-diff, which mutates
 	// shared rune slices, so matching the same corpus from several goroutines
@@ -37,13 +38,19 @@ type googleClassifier struct {
 	mu sync.Mutex
 }
 
-// NewClassifier creates a classifier
+// NewClassifier creates a classifier.
+//
+// The license corpus is loaded on first use rather than here, because loading
+// it costs roughly a second and a run whose candidates all come from the cache
+// never needs it. Corpus load failures therefore surface from Identify.
 func NewClassifier() (Classifier, error) {
-	c, err := assets.DefaultClassifier()
-	if err != nil {
-		return nil, err
-	}
-	return &googleClassifier{classifier: c}, nil
+	return newClassifier(assets.DefaultClassifier), nil
+}
+
+// newClassifier builds a classifier over a corpus loader, which the tests
+// replace to observe when the corpus is loaded.
+func newClassifier(load func() (*licenseclassifier.Classifier, error)) *googleClassifier {
+	return &googleClassifier{load: sync.OnceValues(load)}
 }
 
 type License struct {
@@ -64,8 +71,13 @@ func (c *googleClassifier) Identify(licensePath string) ([]License, error) {
 	}
 	defer file.Close()
 
+	classifier, err := c.load()
+	if err != nil {
+		return nil, err
+	}
+
 	c.mu.Lock()
-	matches, err := c.classifier.MatchFrom(file)
+	matches, err := classifier.MatchFrom(file)
 	c.mu.Unlock()
 	if err != nil {
 		return nil, err

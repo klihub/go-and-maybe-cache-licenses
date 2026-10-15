@@ -367,6 +367,38 @@ guaranteed unique within a module, so prefer it with wildcard patterns. Use the
 
 This flag makes effect to `check`, `report` and `save` commands.
 
+### Caching license information
+
+Resolving licenses means classifying every candidate license file and, for
+`report`, looking up each license's URL over the network. Both results depend
+only on the module version they came from, so they are cached and reused.
+
+Caching is on by default. The cache lives under the user cache directory, and
+`$GO_LICENSES_CACHE_DIR` or the `--cache_dir` global flag override that:
+
+```shell
+go-licenses check ./... --cache_dir .cache/go-licenses
+```
+
+With a populated cache, `report` resolves license URLs without network access.
+Only immutable module versions are cached, so the module being developed, local
+`replace` directives and vendored code are always re-read.
+
+Use `--cache=false` to disable caching entirely.
+
+Use the `--purge_cache` global flag to trim the cache. It purges and exits
+without running the subcommand, keeping at most the given number of most
+recently used versions per module, or emptying the cache when given `0`:
+
+```shell
+go-licenses --purge_cache 3    # keep the 3 newest versions of each module
+go-licenses --purge_cache 0    # empty the cache
+```
+
+In CI, point `--cache_dir` somewhere your job restores between runs. The cache
+is keyed per module version, so bumping one dependency keeps the entries for all
+the others.
+
 ## Warnings and errors
 
 The tool will log warnings and errors in some scenarios. This section provides

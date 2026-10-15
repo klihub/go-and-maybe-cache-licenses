@@ -39,6 +39,9 @@ type Library struct {
 	module *Module
 	// List of licenses for found at the LicenseFile.
 	Licenses []License
+	// cache memoizes license URL resolution. Set by FindLibraries; nil when
+	// caching is disabled.
+	cache Cache
 }
 
 // PackagesError aggregates all Packages[].Errors into a single error.
@@ -61,6 +64,8 @@ func (e PackagesError) Error() string {
 type Options struct {
 	// Classifier identifies the licenses in a candidate file.
 	Classifier Classifier
+	// Cache memoizes classification across runs. A nil Cache disables caching.
+	Cache Cache
 	// IncludeTests includes packages only imported by testing code.
 	IncludeTests bool
 	// IgnoredPaths are package path prefixes to ignore. Dependencies of the
@@ -77,7 +82,7 @@ type Options struct {
 // Packages not covered by a license will be returned as individual libraries.
 // Standard library packages will be ignored.
 //
-// Deprecated: use FindLibraries, which takes an Options struct.
+// Deprecated: use FindLibraries, which additionally accepts a Cache.
 func Libraries(ctx context.Context, classifier Classifier, includeTests bool, ignoredPaths []string, importPaths ...string) ([]*Library, error) {
 	return FindLibraries(ctx, Options{
 		Classifier:   classifier,
@@ -117,7 +122,8 @@ type resolution struct {
 }
 
 // FindLibraries returns the collection of libraries used by the given packages,
-// directly or transitively.
+// directly or transitively, consulting opts.Cache to avoid reclassifying
+// candidate files it has already seen.
 func FindLibraries(ctx context.Context, opts Options, importPaths ...string) ([]*Library, error) {
 	res, err := resolve(ctx, opts, importPaths...)
 	if err != nil {
@@ -274,6 +280,11 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 
 	pkgCandidates := map[string][]string{}
 	allCandidates := map[string]struct{}{}
+	// candidateKeys maps a candidate file to its cache key. A candidate always
+	// lies inside exactly one module directory, so the mapping is unambiguous.
+	// Candidates of uncacheable modules get a zero Key, which Key.Cacheable
+	// rejects.
+	candidateKeys := map[string]Key{}
 	for _, pkg := range allPackages {
 		candidates, err := FindCandidates(pkg.pkgDir, pkg.moduleDir)
 		if err != nil {
@@ -283,6 +294,9 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 		pkgCandidates[pkg.pkgDir] = candidates
 		for _, candidate := range candidates {
 			allCandidates[candidate] = struct{}{}
+			if _, ok := candidateKeys[candidate]; !ok {
+				candidateKeys[candidate] = cacheKey(allModules[pkg.modulePath], pkg.moduleDir, candidate)
+			}
 		}
 	}
 
@@ -298,10 +312,35 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 		candidate := candidate
 
 		group.Go(func() error {
+			key := candidateKeys[candidate]
+			cacheable := opts.Cache != nil && key.Cacheable()
+
+			if cacheable {
+				if cached, ok := opts.Cache.Licenses(key); ok {
+					foundLicenseSlice[idx] = struct {
+						candidate string
+						licenes   []License
+					}{
+						candidate: candidate,
+						licenes:   cached,
+					}
+					return nil
+				}
+			}
+
 			licenses, err := classifier.Identify(candidate)
 			if err != nil {
 				klog.Errorf("Failed to parse %s: %v", candidate, err)
 				return nil // Continue even if one LICENSE file fails to parse.
+			}
+
+			if cacheable {
+				// Store negative results too: most candidates are READMEs with
+				// no license, and not reclassifying those is most of the gain.
+				// A cache failure must never fail the run.
+				if err := opts.Cache.PutLicenses(key, licenses); err != nil {
+					klog.Warningf("Failed to cache license info for %s: %v", candidate, err)
+				}
 			}
 
 			foundLicenseSlice[idx] = struct {
@@ -342,7 +381,7 @@ func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolut
 // that covers them. This is the only phase that depends on which target is
 // being reported.
 func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
-	allModules := r.allModules
+	opts, allModules := r.opts, r.allModules
 	pkgCandidates, foundLicenses := r.pkgCandidates, r.foundLicenses
 
 	pkgsByLicense := make(map[string][]pkgInfo)
@@ -368,6 +407,7 @@ func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
 				libraries = append(libraries, &Library{
 					Packages: []string{p.pkgPath},
 					module:   allModules[p.modulePath],
+					cache:    opts.Cache,
 				})
 			}
 			continue
@@ -378,6 +418,7 @@ func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
 			Licenses:    foundLicenses[licenseFile],
 			Packages:    make([]string, len(pkgs)),
 			module:      allModules[pkgs[0].modulePath],
+			cache:       opts.Cache,
 		}
 
 		for i, p := range pkgs {
@@ -393,6 +434,27 @@ func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
 	})
 
 	return libraries
+}
+
+// cacheKey builds the cache key for a candidate file inside a module.
+//
+// It returns the zero Key - which Key.Cacheable rejects - for anything mutable:
+// a module with no version, which covers the main module under development and
+// local replace directives, or a module with no directory, which covers
+// vendored code.
+func cacheKey(module *Module, moduleDir, candidate string) Key {
+	if module == nil || module.Version == "" || moduleDir == "" {
+		return Key{}
+	}
+	rel, err := filepath.Rel(moduleDir, candidate)
+	if err != nil || rel == "" || strings.HasPrefix(rel, "..") {
+		return Key{}
+	}
+	return Key{
+		Module:  module.Path,
+		Version: module.Version,
+		Path:    filepath.ToSlash(rel),
+	}
 }
 
 // Name is the common prefix of the import paths for all of the packages in this library.
@@ -441,6 +503,23 @@ func (l *Library) FileURL(ctx context.Context, cl *source.Client, filePath strin
 	if m.Dir == "" {
 		return "", wrap(fmt.Errorf("empty go module dir"))
 	}
+
+	// Resolve the module-relative path first, so a cache hit can skip
+	// source.ModuleInfo entirely. That is the whole point: ModuleInfo fetches
+	// go-source meta tags over HTTP for module paths it does not recognise
+	// statically, which is the only network access left in a license run.
+	relativePath, err := filepath.Rel(m.Dir, filePath)
+	if err != nil {
+		return "", wrap(err)
+	}
+	key := Key{Module: m.Path, Version: m.Version, Path: filepath.ToSlash(relativePath)}
+	cacheable := l.cache != nil && key.Cacheable()
+	if cacheable {
+		if url, ok := l.cache.URL(key); ok {
+			return url, nil
+		}
+	}
+
 	remote, err := source.ModuleInfo(ctx, cl, m.Path, m.Version)
 	if err != nil {
 		return "", wrap(err)
@@ -467,13 +546,20 @@ func (l *Library) FileURL(ctx context.Context, cl *source.Client, filePath strin
 		remote.SetCommit("HEAD")
 		klog.Warningf("module %s has empty version, defaults to HEAD. The license URL may be incorrect. Please verify!", m.Path)
 	}
-	relativePath, err := filepath.Rel(m.Dir, filePath)
-	if err != nil {
-		return "", wrap(err)
-	}
 	// TODO: there are still rare cases this may result in an incorrect URL.
 	// https://github.com/google/go-licenses/issues/73#issuecomment-1005587408
-	return remote.FileURL(relativePath), nil
+	url := remote.FileURL(relativePath)
+
+	// Never persist a URL the repository did not confirm. For a "/vN" module
+	// the correct directory depends on a probe, and when that probe cannot
+	// complete the result is a guess - caching it would turn a transient
+	// network failure into a permanently wrong URL.
+	if cacheable && url != "" && !remote.UnverifiedModuleDir() {
+		if err := l.cache.PutURL(key, url); err != nil {
+			klog.Warningf("Failed to cache license URL for %s: %v", filePath, err)
+		}
+	}
+	return url, nil
 }
 
 func (l *Library) Version() string {

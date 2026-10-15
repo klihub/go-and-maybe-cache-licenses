@@ -16,18 +16,33 @@ package main
 
 import (
 	"github.com/google/go-licenses/v2/licenses"
+	"k8s.io/klog/v2"
 )
 
 // libraryOptions builds the options shared by the check, save and report
 // commands.
+//
+// A cache that cannot be opened is reported and skipped rather than failing the
+// run: the cache is an accelerator, never a precondition.
 func libraryOptions() (licenses.Options, error) {
 	classifier, err := licenses.NewClassifier()
 	if err != nil {
 		return licenses.Options{}, err
 	}
-	return licenses.Options{
+	opts := licenses.Options{
 		Classifier:   classifier,
 		IncludeTests: includeTests,
 		IgnoredPaths: ignore,
-	}, nil
+	}
+	if !useCache {
+		return opts, nil
+	}
+	store, dir, err := newCacheStore()
+	if err != nil {
+		klog.Warningf("Not using the license cache: %v", err)
+		return opts, nil
+	}
+	klog.V(1).Infof("Using the license cache in %s.", dir)
+	opts.Cache = store
+	return opts, nil
 }
