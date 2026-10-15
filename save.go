@@ -110,7 +110,7 @@ func saveLibraries(libs []*licenses.Library, dest string) error {
 	// Check that the save path doesn't exist, otherwise it'd end up with a mix of
 	// existing files and the output of this command.
 	if d, err := os.Open(dest); err == nil {
-		d.Close()
+		_ = d.Close()
 		return fmt.Errorf("%s already exists", dest)
 	} else if !os.IsNotExist(err) {
 		return err

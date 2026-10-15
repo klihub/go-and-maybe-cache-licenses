@@ -122,7 +122,7 @@ func writeReportFile(libs []*licenses.Library, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := reportLibraries(libs, f); err != nil {
 		return err
 	}

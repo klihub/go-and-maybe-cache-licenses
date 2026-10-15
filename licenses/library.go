@@ -51,10 +51,10 @@ type PackagesError struct {
 
 func (e PackagesError) Error() string {
 	var str strings.Builder
-	str.WriteString(fmt.Sprintf("errors for %q:", e.pkgs))
+	fmt.Fprintf(&str, "errors for %q:", e.pkgs)
 	packages.Visit(e.pkgs, nil, func(pkg *packages.Package) {
 		for _, err := range pkg.Errors {
-			str.WriteString(fmt.Sprintf("\n%s: %s", pkg.PkgPath, err))
+			fmt.Fprintf(&str, "\n%s: %s", pkg.PkgPath, err)
 		}
 	})
 	return str.String()

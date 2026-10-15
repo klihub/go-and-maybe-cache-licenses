@@ -69,7 +69,7 @@ func (c *googleClassifier) Identify(licensePath string) ([]License, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	classifier, err := c.load()
 	if err != nil {

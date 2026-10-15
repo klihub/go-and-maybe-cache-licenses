@@ -142,8 +142,7 @@ func TestLibraries(t *testing.T) {
 	} {
 		t.Run(test.desc, func(t *testing.T) {
 			if test.goflags != "" {
-				os.Setenv("GOFLAGS", test.goflags)
-				defer os.Unsetenv("GOFLAGS")
+				t.Setenv("GOFLAGS", test.goflags)
 			}
 			gotLibs, err := Libraries(context.Background(), classifier, test.includeTests, test.ignore, test.importPath)
 			if err != nil {
