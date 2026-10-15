@@ -62,35 +62,63 @@ func init() {
 }
 
 func saveMain(_ *cobra.Command, args []string) error {
+	opts, err := libraryOptions()
+	if err != nil {
+		return err
+	}
 
-	if overwriteSavePath {
-		if err := os.RemoveAll(savePath); err != nil {
+	if targetPath == "" {
+		if overwriteSavePath {
+			if err := os.RemoveAll(savePath); err != nil {
+				return err
+			}
+		}
+		libs, err := licenses.FindLibraries(context.Background(), opts, args...)
+		if err != nil {
 			return err
 		}
+		return saveLibraries(libs, savePath)
 	}
 
-	classifier, err := licenses.NewClassifier()
+	outputs, err := resolvePerTarget(opts, args)
 	if err != nil {
 		return err
 	}
-
-	libs, err := licenses.Libraries(context.Background(), classifier, includeTests, ignore, args...)
-	if err != nil {
+	// save joins each rendered path under savePath, so it must not escape.
+	if err := requireLocalPaths(outputs); err != nil {
 		return err
 	}
+	// Each target gets its own subtree, so --force and the "must not exist"
+	// check apply per target: otherwise the second target would always collide
+	// with the first one's output.
+	for _, out := range outputs {
+		dest := filepath.Join(savePath, out.Path)
+		if overwriteSavePath {
+			if err := os.RemoveAll(dest); err != nil {
+				return err
+			}
+		}
+		if err := saveLibraries(out.Libraries, dest); err != nil {
+			return fmt.Errorf("saving target %s: %w", out.Name, err)
+		}
+	}
+	return nil
+}
 
+// saveLibraries writes the files required by libs' license terms into dest.
+func saveLibraries(libs []*licenses.Library, dest string) error {
 	// Check that the save path doesn't exist, otherwise it'd end up with a mix of
 	// existing files and the output of this command.
-	if d, err := os.Open(savePath); err == nil {
+	if d, err := os.Open(dest); err == nil {
 		d.Close()
-		return fmt.Errorf("%s already exists", savePath)
+		return fmt.Errorf("%s already exists", dest)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 
 	libsWithBadLicenses := make(map[licenses.Type][]*licenses.Library)
 	for _, lib := range libs {
-		libSaveDir := filepath.Join(savePath, unvendor(lib.Name()))
+		libSaveDir := filepath.Join(dest, unvendor(lib.Name()))
 
 		licenseTypes := make([]licenses.Type, 0, len(lib.Licenses))
 		for _, license := range lib.Licenses {

@@ -57,11 +57,80 @@ func (e PackagesError) Error() string {
 	return str.String()
 }
 
+// Options configures library discovery.
+type Options struct {
+	// Classifier identifies the licenses in a candidate file.
+	Classifier Classifier
+	// IncludeTests includes packages only imported by testing code.
+	IncludeTests bool
+	// IgnoredPaths are package path prefixes to ignore. Dependencies of the
+	// ignored packages are still checked.
+	IgnoredPaths []string
+	// MainOnly restricts per-target resolution to main packages, which is
+	// useful when a wildcard pattern expands to library packages that are not
+	// shipped. It has no effect on FindLibraries.
+	MainOnly bool
+}
+
 // Libraries returns the collection of libraries used by this package, directly or transitively.
 // A library is a collection of one or more packages covered by the same license file.
 // Packages not covered by a license will be returned as individual libraries.
 // Standard library packages will be ignored.
+//
+// Deprecated: use FindLibraries, which takes an Options struct.
 func Libraries(ctx context.Context, classifier Classifier, includeTests bool, ignoredPaths []string, importPaths ...string) ([]*Library, error) {
+	return FindLibraries(ctx, Options{
+		Classifier:   classifier,
+		IncludeTests: includeTests,
+		IgnoredPaths: ignoredPaths,
+	}, importPaths...)
+}
+
+// pkgInfo describes one package that needs a license.
+type pkgInfo struct {
+	// pkgPath is the import path of the package.
+	pkgPath string
+	// modulePath is the module path of the package.
+	modulePath string
+
+	// pkgDir is the directory containing the package's source code.
+	pkgDir string
+	// moduleDir is the directory containing the module's source code.
+	moduleDir string
+}
+
+// resolution is the part of library discovery that does not depend on which
+// target is being reported: the loaded package graph, the candidate files, and
+// their classifications.
+//
+// Splitting it out is what lets one invocation serve several targets. Loading
+// all targets at once costs barely more than loading one, since they share
+// nearly all their dependencies, and each candidate is then classified once for
+// all of them.
+type resolution struct {
+	opts          Options
+	roots         []*packages.Package
+	allModules    map[string]*Module
+	allPackages   []pkgInfo
+	pkgCandidates map[string][]string  // package dir -> candidate files
+	foundLicenses map[string][]License // candidate file -> licenses, non-empty only
+}
+
+// FindLibraries returns the collection of libraries used by the given packages,
+// directly or transitively.
+func FindLibraries(ctx context.Context, opts Options, importPaths ...string) ([]*Library, error) {
+	res, err := resolve(ctx, opts, importPaths...)
+	if err != nil {
+		return nil, err
+	}
+	return res.librariesFor(res.allPackages), nil
+}
+
+// resolve runs the phases shared by every target.
+func resolve(ctx context.Context, opts Options, importPaths ...string) (*resolution, error) {
+	classifier := opts.Classifier
+	includeTests := opts.IncludeTests
+	ignoredPaths := opts.IgnoredPaths
 	// These are the steps we take to find libraries:
 	// 1. we list all modules and all packages
 	// 2. for each package, we find a list of candidates
@@ -96,18 +165,6 @@ func Libraries(ctx context.Context, classifier Classifier, includeTests bool, ig
 		}
 
 		vendoredSearch = append(vendoredSearch, module)
-	}
-
-	type pkgInfo struct {
-		// pkgPath is the import path of the package.
-		pkgPath string
-		// modulePath is the module path of the package.
-		modulePath string
-
-		// pkgDir is the directory containing the package's source code.
-		pkgDir string
-		// moduleDir is the directory containing the module's source code.
-		moduleDir string
 	}
 
 	allModules := map[string]*Module{}
@@ -271,8 +328,25 @@ func Libraries(ctx context.Context, classifier Classifier, includeTests bool, ig
 		foundLicenses[found.candidate] = found.licenes
 	}
 
+	return &resolution{
+		opts:          opts,
+		roots:         rootPkgs,
+		allModules:    allModules,
+		allPackages:   allPackages,
+		pkgCandidates: pkgCandidates,
+		foundLicenses: foundLicenses,
+	}, nil
+}
+
+// librariesFor groups the given packages into libraries by the license file
+// that covers them. This is the only phase that depends on which target is
+// being reported.
+func (r *resolution) librariesFor(pkgs []pkgInfo) []*Library {
+	allModules := r.allModules
+	pkgCandidates, foundLicenses := r.pkgCandidates, r.foundLicenses
+
 	pkgsByLicense := make(map[string][]pkgInfo)
-	for _, pkg := range allPackages {
+	for _, pkg := range pkgs {
 		candidates := pkgCandidates[pkg.pkgDir]
 
 		bestCandidate := ""
@@ -318,7 +392,7 @@ func Libraries(ctx context.Context, classifier Classifier, includeTests bool, ig
 		return libraries[i].Name() < libraries[j].Name()
 	})
 
-	return libraries, nil
+	return libraries
 }
 
 // Name is the common prefix of the import paths for all of the packages in this library.

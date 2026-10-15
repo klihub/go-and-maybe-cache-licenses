@@ -318,6 +318,55 @@ go-licenses check --include_tests "github.com/google/go-licenses/..."
 
 This flag makes effect to `check`, `report` and `save` commands.
 
+### Resolving several targets in one run
+
+By default, passing several packages reports their *union*: one combined result
+covering every dependency of all of them. A project that ships several binaries
+usually wants a separate result per binary instead.
+
+Use the `--target_path` global flag to get one result per target from a single
+run. Its value is a [Go template](https://pkg.go.dev/text/template) naming each
+target's output:
+
+```shell
+go-licenses report ./cmd/frontend ./cmd/backend \
+    --target_path 'licenses/{{ .Base }}/licenses.csv'
+```
+
+Available fields, for a target `./cmd/backend` in module `example.com/product`:
+
+| Field         | Value                       |
+| ------------- | --------------------------- |
+| `.Name`       | `backend`, or the name given as `name=pattern` |
+| `.Base`       | `backend`                   |
+| `.Path`       | `example.com/product/cmd/backend` |
+| `.Dir`        | `example.com/product/cmd`   |
+| `.Rel`        | `cmd/backend`               |
+| `.Pattern`    | `./cmd/backend`             |
+| `.Module`     | `example.com/product`       |
+| `.ModuleBase` | `product`                   |
+
+An output name is not always derivable from the package path: two binaries built
+from `./cmd/x` and `./cmd/y` may ship under unrelated names. Give the name
+explicitly as `name=pattern`:
+
+```shell
+go-licenses save --save_path licenses --target_path '{{ .Name }}' \
+    product-frontend=./cmd/frontend \
+    product-backend=./cmd/backend
+```
+
+For `save`, the rendered path is relative to `--save_path`, and each target gets
+its own subtree. For `report`, the rendered path is the output file.
+
+Two targets that render the same path is an error rather than an overwrite, and
+every path is checked before anything is written. `.Rel` is the only field
+guaranteed unique within a module, so prefer it with wildcard patterns. Use the
+`--main_only` global flag to keep only `main` packages when a wildcard such as
+`./cmd/...` also matches library packages.
+
+This flag makes effect to `check`, `report` and `save` commands.
+
 ## Warnings and errors
 
 The tool will log warnings and errors in some scenarios. This section provides

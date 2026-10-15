@@ -18,7 +18,9 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"text/template"
 	"time"
 
@@ -82,16 +84,53 @@ func (lib libraryDataFlat) LicenseText() (string, error) {
 }
 
 func reportMain(_ *cobra.Command, args []string) error {
-	classifier, err := licenses.NewClassifier()
+	opts, err := libraryOptions()
 	if err != nil {
 		return err
 	}
 
-	libs, err := licenses.Libraries(context.Background(), classifier, includeTests, ignore, args...)
+	if targetPath == "" {
+		libs, err := licenses.FindLibraries(context.Background(), opts, args...)
+		if err != nil {
+			return err
+		}
+		return reportLibraries(libs, os.Stdout)
+	}
+
+	outputs, err := resolvePerTarget(opts, args)
 	if err != nil {
 		return err
 	}
+	// Every output path is validated before anything is written, so a
+	// collision or an escaping path leaves no partial results behind.
+	for _, out := range outputs {
+		if err := writeReportFile(out.Libraries, out.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+// writeReportFile writes one target's report to path, creating its parent.
+func writeReportFile(libs []*licenses.Library, path string) error {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := reportLibraries(libs, f); err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+// reportLibraries resolves license URLs for libs and writes the report to w.
+func reportLibraries(libs []*licenses.Library, w io.Writer) error {
 	reportData := make([]libraryData, len(libs))
 	client := source.NewClient(time.Second * 20)
 	group, gctx := errgroup.WithContext(context.Background())
@@ -168,14 +207,14 @@ func reportMain(_ *cobra.Command, args []string) error {
 	}
 
 	if templateFile == "" {
-		return reportCSV(reportDataFlat)
+		return reportCSV(reportDataFlat, w)
 	} else {
-		return reportTemplate(reportDataFlat)
+		return reportTemplate(reportDataFlat, w)
 	}
 }
 
-func reportCSV(libs []libraryDataFlat) error {
-	writer := csv.NewWriter(os.Stdout)
+func reportCSV(libs []libraryDataFlat, w io.Writer) error {
+	writer := csv.NewWriter(w)
 	for _, lib := range libs {
 		if err := writer.Write([]string{lib.Name, lib.LicenseURL, lib.LicenseName}); err != nil {
 			return err
@@ -185,7 +224,7 @@ func reportCSV(libs []libraryDataFlat) error {
 	return writer.Error()
 }
 
-func reportTemplate(libs []libraryDataFlat) error {
+func reportTemplate(libs []libraryDataFlat, w io.Writer) error {
 	templateBytes, err := os.ReadFile(templateFile)
 	if err != nil {
 		return err
@@ -194,5 +233,5 @@ func reportTemplate(libs []libraryDataFlat) error {
 	if err != nil {
 		return err
 	}
-	return tmpl.Execute(os.Stdout, libs)
+	return tmpl.Execute(w, libs)
 }

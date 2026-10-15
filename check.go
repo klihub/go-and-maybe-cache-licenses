@@ -67,14 +67,49 @@ func checkMain(_ *cobra.Command, args []string) error {
 		hasLicenseType = true
 	}
 
-	classifier, err := licenses.NewClassifier()
+	opts, err := libraryOptions()
 	if err != nil {
 		return err
 	}
 
-	libs, err := licenses.Libraries(context.Background(), classifier, includeTests, ignore, args...)
+	if targetPath == "" {
+		libs, err := licenses.FindLibraries(context.Background(), opts, args...)
+		if err != nil {
+			return err
+		}
+		if checkLibraries(libs, "", allowedLicenseNames, disallowedLicenseTypes, hasLicenseNames, hasLicenseType) {
+			os.Exit(1)
+		}
+		return nil
+	}
+
+	// Per-target mode exists for the diagnostics: checking the union would
+	// still catch every violation, since the union is a superset, but it could
+	// not say which target the offending library belongs to.
+	outputs, err := resolvePerTarget(opts, args)
 	if err != nil {
 		return err
+	}
+	found := false
+	for _, out := range outputs {
+		if checkLibraries(out.Libraries, out.Name, allowedLicenseNames, disallowedLicenseTypes,
+			hasLicenseNames, hasLicenseType) {
+			found = true
+		}
+	}
+	if found {
+		os.Exit(1)
+	}
+	return nil
+}
+
+// checkLibraries reports whether any library violates the policy, writing
+// diagnostics to stderr. target, when non-empty, prefixes each message.
+func checkLibraries(libs []*licenses.Library, target string, allowedLicenseNames []string,
+	disallowedLicenseTypes []licenses.Type, hasLicenseNames, hasLicenseType bool) bool {
+	prefix := ""
+	if target != "" {
+		prefix = target + ": "
 	}
 
 	// indicate that a forbidden license was found
@@ -82,19 +117,21 @@ func checkMain(_ *cobra.Command, args []string) error {
 
 	for _, lib := range libs {
 		if lib.LicenseFile == "" {
-			fmt.Fprintf(os.Stderr, "Did not find license for library '%v'.\n", lib)
+			fmt.Fprintf(os.Stderr, "%sDid not find license for library '%v'.\n", prefix, lib)
 			found = true
 			continue
 		}
 
 		for _, license := range lib.Licenses {
 			if hasLicenseNames && !isAllowedLicenseName(license.Name, allowedLicenseNames) {
-				fmt.Fprintf(os.Stderr, "Not allowed license '%s' found for library '%v'.\n", license.Name, lib)
+				fmt.Fprintf(os.Stderr, "%sNot allowed license '%s' found for library '%v'.\n",
+					prefix, license.Name, lib)
 				found = true
 			} else if hasLicenseType && isDisallowedLicenseType(license.Type, disallowedLicenseTypes) {
 				fmt.Fprintf(
 					os.Stderr,
-					"License '%s' of not allowed license type '%s' found for library '%v'.\n",
+					"%sLicense '%s' of not allowed license type '%s' found for library '%v'.\n",
+					prefix,
 					license.Name,
 					cases.Title(language.English).String(license.Type.String()),
 					lib)
@@ -103,11 +140,7 @@ func checkMain(_ *cobra.Command, args []string) error {
 		}
 	}
 
-	if found {
-		os.Exit(1)
-	}
-
-	return nil
+	return found
 }
 
 func getDisallowedLicenseTypes() []licenses.Type {
