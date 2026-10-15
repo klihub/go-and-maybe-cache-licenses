@@ -16,6 +16,7 @@ package licenses
 
 import (
 	"os"
+	"sync"
 
 	licenseclassifier "github.com/google/licenseclassifier/v2"
 	"github.com/google/licenseclassifier/v2/assets"
@@ -28,6 +29,12 @@ type Classifier interface {
 
 type googleClassifier struct {
 	classifier *licenseclassifier.Classifier
+	// mu serializes matching. licenseclassifier's Classifier is not safe for
+	// concurrent use: its scoring path reaches sergi/go-diff, which mutates
+	// shared rune slices, so matching the same corpus from several goroutines
+	// races and can mis-score a license. Libraries classifies candidates from
+	// an errgroup, so without this a license run races by construction.
+	mu sync.Mutex
 }
 
 // NewClassifier creates a classifier
@@ -57,7 +64,9 @@ func (c *googleClassifier) Identify(licensePath string) ([]License, error) {
 	}
 	defer file.Close()
 
+	c.mu.Lock()
 	matches, err := c.classifier.MatchFrom(file)
+	c.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
