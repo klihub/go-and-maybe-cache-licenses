@@ -31,3 +31,22 @@ func (i *Info) SetCommit(commit string) {
 	}
 	i.commit = commit
 }
+
+// UnverifiedModuleDir reports whether this Info's module directory was chosen
+// without a definitive answer from the repository.
+//
+// For a module whose path ends in "/vN", adjustVersionedModuleDirectory probes
+// the repository to decide whether that versioned subdirectory really exists,
+// and assumes the unversioned directory when it cannot tell. With no network
+// the probe always fails, so the assumption is made blindly and the resulting
+// URL may be wrong - for example ".../blob/v2.0.0/LICENSE" where the correct
+// URL is ".../blob/v2.0.0/v2/LICENSE".
+//
+// Callers that persist URLs must not store one for which this returns true, or
+// a transient lack of network becomes a permanently wrong cached URL.
+func (i *Info) UnverifiedModuleDir() bool {
+	if i == nil {
+		return false
+	}
+	return i.unverifiedModuleDir
+}

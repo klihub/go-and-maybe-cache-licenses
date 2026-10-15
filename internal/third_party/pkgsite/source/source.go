@@ -46,6 +46,11 @@ type Info struct {
 	moduleDir string       // directory of module relative to repo root
 	commit    string       // tag or ID of commit corresponding to version
 	templates urlTemplates // for building URLs
+
+	// unverifiedModuleDir records that moduleDir was assumed rather than
+	// confirmed, because the probe in adjustVersionedModuleDirectory could not
+	// reach the repository. See Info.UnverifiedModuleDir in source_patch.go.
+	unverifiedModuleDir bool
 }
 
 // FileURL returns a URL for a file whose pathname is relative to the module's home directory.
@@ -450,12 +455,23 @@ func adjustVersionedModuleDirectory(ctx context.Context, client *Client, info *I
 	}
 	// moduleDir does have a "/vN" for N > 1. To see if that is the actual directory,
 	// fetch the go.mod file from it.
-	res, err := client.doURL(ctx, "HEAD", info.FileURL("go.mod"), true)
-	// On any failure, assume that the right directory is the one without the version.
+	//
+	// only200 is false so that a definitive non-200 response is distinguishable
+	// from not reaching the server at all. Both still fall back to the
+	// unversioned directory, but only the latter is marked unverified, because
+	// only the latter may be wrong. See Info.UnverifiedModuleDir.
+	res, err := client.doURL(ctx, "HEAD", info.FileURL("go.mod"), false)
 	if err != nil {
+		// No answer at all, e.g. no network. Assume the directory without the
+		// version, as before, but record that nothing confirmed it.
 		info.moduleDir = dirWithoutVersion
-	} else {
-		res.Body.Close()
+		info.unverifiedModuleDir = true
+		return
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		// The repository answered: the versioned directory is not there.
+		info.moduleDir = dirWithoutVersion
 	}
 }
 
