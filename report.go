@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -100,7 +101,7 @@ func reportMain(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		return reportLibraries(libs, os.Stdout)
+		return reportLibraries(libs, os.Stdout, "resolved license URLs")
 	}
 
 	outputs, err := resolvePerTarget(opts, args)
@@ -110,7 +111,8 @@ func reportMain(_ *cobra.Command, args []string) error {
 	// Every output path is validated before anything is written, so a
 	// collision or an escaping path leaves no partial results behind.
 	for _, out := range outputs {
-		if err := writeReportFile(out.Libraries, out.Path); err != nil {
+		if err := writeReportFile(out.Libraries, out.Path,
+			fmt.Sprintf("resolved license URLs for %s:", out.Name)); err != nil {
 			return err
 		}
 	}
@@ -118,7 +120,7 @@ func reportMain(_ *cobra.Command, args []string) error {
 }
 
 // writeReportFile writes one target's report to path, creating its parent.
-func writeReportFile(libs []*licenses.Library, path string) error {
+func writeReportFile(libs []*licenses.Library, path, what string) error {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
@@ -129,16 +131,24 @@ func writeReportFile(libs []*licenses.Library, path string) error {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	if err := reportLibraries(libs, f); err != nil {
+	if err := reportLibraries(libs, f, what); err != nil {
 		return err
 	}
 	return f.Close()
 }
 
 // reportLibraries resolves license URLs for libs and writes the report to w.
-func reportLibraries(libs []*licenses.Library, w io.Writer) error {
+func reportLibraries(libs []*licenses.Library, w io.Writer, what string) error {
 	reportData := make([]libraryData, len(libs))
 	client := source.NewClient(licenseURLTimeout)
+	urlProgress := newRunProgress(what)
+	var resolved atomic.Int64
+	var toResolve int
+	for _, lib := range libs {
+		if lib.LicenseFile != "" {
+			toResolve++
+		}
+	}
 	group, gctx := errgroup.WithContext(context.Background())
 	for idx, lib := range libs {
 		idx := idx
@@ -172,6 +182,7 @@ func reportLibraries(libs []*licenses.Library, w io.Writer) error {
 				} else {
 					klog.Warningf("Error discovering license URL: %s", err)
 				}
+				urlProgress.report(int(resolved.Add(1)), toResolve)
 				return nil
 			})
 		}

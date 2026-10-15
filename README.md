@@ -367,6 +367,24 @@ guaranteed unique within a module, so prefer it with wildcard patterns. Use the
 
 This flag makes effect to `check`, `report` and `save` commands.
 
+### Progress reporting
+
+Classifying license files and resolving license URLs both know how much work
+they have before they start, so the `--progress` global flag reports a real
+proportion rather than just signs of life:
+
+```shell
+$ go-licenses report ./cmd/... --progress
+classified 60% (156/260)
+classified 100% (260/260)
+resolved license URLs 90% (99/109)
+resolved license URLs 100% (109/109)
+```
+
+It is off by default. Besides showing how far along a run is, it makes a stall
+legible: a report that sits at the same proportion for twenty seconds is
+waiting on an unreachable repository, not working slowly.
+
 ### Caching license information
 
 Resolving licenses means classifying every candidate license file and, for

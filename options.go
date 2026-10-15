@@ -33,6 +33,7 @@ func libraryOptions() (licenses.Options, error) {
 		Classifier:   classifier,
 		IncludeTests: includeTests,
 		IgnoredPaths: ignore,
+		Progress:     progressFor("classified"),
 	}
 	if !useCache {
 		return opts, nil
